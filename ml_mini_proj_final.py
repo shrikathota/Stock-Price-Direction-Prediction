@@ -8,26 +8,27 @@ Original file is located at
 """
 
 pip install yfinance pandas numpy scikit-learn matplotlib tensorflow ta
-
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import ta
+
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, confusion_matrix,classification_report
-import matplotlib.pyplot as plt
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
-import ta
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+from sklearn.utils.class_weight import compute_class_weight
+from imblearn.over_sampling import RandomOverSampler
 
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
-import ta
+from tensorflow.keras.callbacks import EarlyStopping
+
+# 1. Download Data
 df = yf.download(tickers="AAPL", interval="5m", period="60d")
-
 df.dropna(inplace=True)
-print(df.head())
-# Feature Engineering
+
+# 2. Feature Engineering
 close = df['Close'].squeeze()
 high = df['High'].squeeze()
 low = df['Low'].squeeze()
@@ -36,29 +37,37 @@ volume = df['Volume'].squeeze()
 # Momentum
 df['RSI'] = ta.momentum.RSIIndicator(close).rsi()
 df['Stoch'] = ta.momentum.StochasticOscillator(high, low, close).stoch()
+
 # Trend
 df['MACD'] = ta.trend.MACD(close).macd()
 df['EMA'] = ta.trend.EMAIndicator(close).ema_indicator()
+
 # Volatility
 bb = ta.volatility.BollingerBands(close)
 df['BB_high'] = bb.bollinger_hband()
 df['BB_low'] = bb.bollinger_lband()
+
 # Volume
 df['Volume_Change'] = volume.pct_change()
+
 df.dropna(inplace=True)
-# Create Target Variable
+
+# 3. Create Target Variable
+# Threshold to remove noise (e.g., return > 0.1%)
 df['Return'] = df['Close'].pct_change().shift(-1)
-
-# threshold to remove noise
 df['Target'] = np.where(df['Return'] > 0.001, 1, 0)
-df.dropna(inplace=True)
-# Select Features
-features = [ 'Close','RSI','Stoch','MACD','EMA','BB_high','BB_low','Volume_Change' ]
 
-X = df[features]
-y = df['Target']
-# Clean Data
-# Replace infinity with NaN
+df.dropna(inplace=True)
+
+# 4. Select and Clean Features
+features = [
+    'Close', 'RSI', 'Stoch', 'MACD', 'EMA',
+    'BB_high', 'BB_low', 'Volume_Change'
+]
+
+X = df[features].copy()
+y = df['Target'].copy()
+
 # Replace infinity with NaN and drop
 X = X.replace([np.inf, -np.inf], np.nan)
 X = X.dropna()
@@ -83,7 +92,6 @@ X_train, X_test, y_train, y_test = train_test_split(
     X_seq, y_seq, test_size=0.2, shuffle=True, stratify=y_seq, random_state=42
 )
 
-from imblearn.over_sampling import RandomOverSampler
 # 7. Apply Oversampling
 # Reshape 3D to 2D for RandomOverSampler
 original_shape = X_train.shape
@@ -99,7 +107,6 @@ print(f"Original training shape: {original_shape}")
 print(f"Resampled training shape: {X_train_resampled.shape}")
 print(f"Resampled target distribution: {np.bincount(y_train_resampled)}")
 
-from sklearn.utils.class_weight import compute_class_weight
 # 8. Compute Class Weights
 classes = np.unique(y_train_resampled)
 weights = compute_class_weight(class_weight='balanced', classes=classes, y=y_train_resampled)
@@ -118,7 +125,6 @@ model = Sequential([
 model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
 model.summary()
 
-from tensorflow.keras.callbacks import EarlyStopping
 # 10. Training with Early Stopping
 early_stop = EarlyStopping(
     monitor='val_loss',
